@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 from pathlib import Path
 
 import cv2
@@ -32,6 +33,18 @@ SKELETON = (
     (14, 16),
 )
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+
+
+def video_writer_fps(source_fps):
+    """Return an MPEG-4-compatible FPS without changing normal frame rates."""
+    if not math.isfinite(source_fps) or source_fps <= 0:
+        return 25.0
+    # OpenCV/FFmpeg may re-approximate high fractional camera rates (for
+    # example 239.5862069 as 119793/500), exceeding MPEG-4's timebase limit.
+    # Integer high-speed rates and normal fractional rates remain untouched.
+    if source_fps > 65 and not math.isclose(source_fps, round(source_fps)):
+        return float(round(source_fps))
+    return float(source_fps)
 
 
 def create_session(path):
@@ -166,7 +179,10 @@ def run_video(args, det_session, pose_session, output):
         raise RuntimeError(f"Failed to read video: {args.input}")
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
+    source_fps = capture.get(cv2.CAP_PROP_FPS)
+    fps = video_writer_fps(source_fps)
+    if source_fps and not np.isclose(fps, source_fps):
+        print(f"Output FPS adjusted from {source_fps:.6g} to {fps:g} for MPEG-4")
     writer = cv2.VideoWriter(
         str(output), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
     )
