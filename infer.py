@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+from keypoint_config import filter_predictions, load_keypoint_config
+
 
 DET_SIZE = (640, 640)
 POSE_SIZE = (288, 384)
@@ -231,6 +233,10 @@ def main():
         type=Path,
         help="export keypoints to JSON, optionally specifying a path",
     )
+    parser.add_argument(
+        "--keypoint-config", type=Path, default=Path("keypoint_config.json"),
+        help="keypoint filter config (used when the file exists)",
+    )
     args = parser.parse_args()
 
     is_image = args.input.suffix.lower() in IMAGE_SUFFIXES
@@ -245,6 +251,9 @@ def main():
     else:
         predictions = run_video(args, det_session, pose_session, output)
     if args.json is not None:
+        predictions = filter_predictions(
+            predictions, load_keypoint_config(args.keypoint_config)
+        )
         json_output = (
             Path(f"{args.input.stem}_pose.json") if args.json is True else args.json
         )

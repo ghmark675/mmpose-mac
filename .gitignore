@@ -22,3 +22,5 @@ outputs/
 images/
 videos/
 results/
+
+keypoint_config.json
