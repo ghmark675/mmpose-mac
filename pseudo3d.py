@@ -13,6 +13,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
+from smoothing import DEFAULT_WINDOW_MS, savgol_window_length, smooth_keypoints3d
+
 
 COCO17_JOINT_NAMES = np.asarray(
     [
@@ -36,18 +38,6 @@ COCO17_JOINT_NAMES = np.asarray(
     ]
 )
 
-SCALE_BONES = (
-    (5, 7),
-    (6, 8),
-    (7, 9),
-    (8, 10),
-    (11, 13),
-    (12, 14),
-    (13, 15),
-    (14, 16),
-    (5, 6),
-    (11, 12),
-)
 
 
 def _validate_keypoints(points: Any) -> np.ndarray:
@@ -114,14 +104,21 @@ def adapt_rtmpose_keypoints(
     return _validate_keypoints(points)
 
 
-def mean_bone_length(keypoints: Any) -> np.float32:
-    """Return the mean 2-D length of the ten requested body segments."""
-    points = _validate_keypoints(keypoints)
-    starts, ends = np.asarray(SCALE_BONES).T
-    value = np.linalg.norm(points[starts] - points[ends], axis=1).mean()
-    if not np.isfinite(value) or value <= np.finfo(np.float32).eps:
-        raise ValueError("mean bone length must be positive")
-    return np.float32(value)
+def estimate_vertical_scale(fo_points: Any, dtl_points: Any) -> np.float32:
+    """Fit one DTL-to-FO scale from corresponding body-joint vertical spans."""
+    fo = np.asarray(fo_points, dtype=np.float64).reshape(-1, 17, 2)[:, 5:, 1]
+    dtl = np.asarray(dtl_points, dtype=np.float64).reshape(-1, 17, 2)[:, 5:, 1]
+    if fo.shape != dtl.shape or not np.isfinite(fo).all() or not np.isfinite(dtl).all():
+        raise ValueError("scale requires matching finite poses")
+    a, b = np.triu_indices(12, 1)
+    dy_fo, dy_dtl = fo[:, a] - fo[:, b], dtl[:, a] - dtl[:, b]
+    valid = ((np.abs(dy_fo) > np.maximum(np.ptp(fo, axis=1)[:, None] * 0.2, 1e-6))
+             & (np.abs(dy_dtl) > np.maximum(np.ptp(dtl, axis=1)[:, None] * 0.2, 1e-6))
+             & (dy_fo * dy_dtl > 0))
+    if not valid.any():
+        raise ValueError("no usable corresponding vertical spans")
+    x, y = dy_dtl[valid], dy_fo[valid]
+    return np.float32(np.dot(x, y) / np.dot(x, x))
 
 
 def reconstruct_frame(
@@ -130,6 +127,7 @@ def reconstruct_frame(
     *,
     fo_origin: Sequence[float] | None = None,
     dtl_origin: Sequence[float] | None = None,
+    scale: float | None = None,
 ) -> np.ndarray:
     """Reconstruct one pseudo-3D frame, optionally using fixed view origins."""
     fo_points = adapt_rtmpose_keypoints(fo_output)
@@ -141,10 +139,13 @@ def reconstruct_frame(
 
     fo = fo_points - fo_origin_array.astype(np.float32)
     dtl = dtl_points - dtl_origin_array.astype(np.float32)
-    scale = mean_bone_length(fo) / mean_bone_length(dtl)
+    if scale is None:
+        scale = estimate_vertical_scale(fo_points, dtl_points)
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("scale must be finite and positive")
     dtl = dtl * np.float32(scale)
     result = np.stack(
-        (fo[:, 0], (fo[:, 1] + dtl[:, 1]) / np.float32(2.0), dtl[:, 0]),
+        (fo[:, 0], fo[:, 1], dtl[:, 0]),
         axis=1,
     )
     return np.ascontiguousarray(result, dtype=np.float32)
@@ -164,37 +165,28 @@ def reconstruct_sequence(
     fo_by_index = dict(fo_frames)
     dtl_by_index = dict(dtl_frames)
     common_indices = sorted(fo_by_index.keys() & dtl_by_index.keys())
-    reconstructed: list[np.ndarray] = []
-    valid_indices: list[int] = []
-    fixed_fo_origin = None
-    fixed_dtl_origin = None
-
+    pairs = []
+    valid_indices = []
     for frame_index in common_indices:
         try:
             fo = adapt_rtmpose_keypoints(fo_by_index[frame_index])
             dtl = adapt_rtmpose_keypoints(dtl_by_index[frame_index])
-            if fixed_origin and fixed_fo_origin is None:
-                # Assign only after this pair has also passed scale validation.
-                candidate = reconstruct_frame(
-                    fo, dtl, fo_origin=fo[16], dtl_origin=dtl[16]
-                )
-                fixed_fo_origin = fo[16].copy()
-                fixed_dtl_origin = dtl[16].copy()
-                frame = candidate
-            else:
-                frame = reconstruct_frame(
-                    fo, dtl, fo_origin=fixed_fo_origin, dtl_origin=fixed_dtl_origin
-                )
+            estimate_vertical_scale(fo, dtl)
         except (TypeError, ValueError, IndexError):
             continue
-        reconstructed.append(frame)
+        pairs.append((fo, dtl))
         valid_indices.append(int(frame_index))
 
-    if reconstructed:
-        keypoints3d = np.stack(reconstructed).astype(np.float32, copy=False)
-    else:
-        keypoints3d = np.empty((0, 17, 3), dtype=np.float32)
-    return keypoints3d, np.asarray(valid_indices, dtype=np.int64)
+    if not pairs:
+        return np.empty((0, 17, 3), dtype=np.float32), np.asarray([], dtype=np.int64)
+    fo_poses, dtl_poses = zip(*pairs)
+    scale = estimate_vertical_scale(fo_poses, dtl_poses)
+    points = [reconstruct_frame(
+        fo, dtl, scale=scale,
+        fo_origin=pairs[0][0][16] if fixed_origin else None,
+        dtl_origin=pairs[0][1][16] if fixed_origin else None,
+    ) for fo, dtl in pairs]
+    return np.stack(points), np.asarray(valid_indices, dtype=np.int64)
 
 
 def save_keypoints3d(path: str | Path, keypoints3d: Any, frame_indices: Any) -> Path:
@@ -239,16 +231,35 @@ def main() -> None:
     parser.add_argument("dtl_json", type=Path, help="DTL output from infer.py --json")
     parser.add_argument("-o", "--output", type=Path, default=Path("keypoints3d.npz"))
     parser.add_argument(
+        "--smooth-fps", type=float,
+        help="enable 3-D SG smoothing using this source FPS (JSON has no FPS metadata)",
+    )
+    parser.add_argument(
+        "--smooth-window-ms", type=float,
+        help="SG window time span in milliseconds (default: 67; requires --smooth-fps)",
+    )
+    parser.add_argument(
         "--per-frame-origin",
         action="store_true",
         help="center every frame independently instead of retaining translation",
     )
     args = parser.parse_args()
+    if args.smooth_window_ms is not None and args.smooth_fps is None:
+        parser.error("--smooth-window-ms requires --smooth-fps")
+    window_ms = DEFAULT_WINDOW_MS if args.smooth_window_ms is None else args.smooth_window_ms
+    if args.smooth_fps is not None:
+        window_frames = savgol_window_length(args.smooth_fps, window_ms)
     points, indices = reconstruct_sequence(
         load_infer_json(args.fo_json),
         load_infer_json(args.dtl_json),
         fixed_origin=not args.per_frame_origin,
     )
+    if args.smooth_fps is not None:
+        raw_path = args.output.with_name(f"{args.output.stem}_raw{args.output.suffix}")
+        save_keypoints3d(raw_path, points, indices)
+        points = smooth_keypoints3d(points, indices, fps=args.smooth_fps, window_ms=window_ms)
+        print(f"Smoothed 3-D with quadratic Savitzky-Golay ({window_frames} frames)")
+        print(f"Raw reconstruction: {raw_path}")
     save_keypoints3d(args.output, points, indices)
     print(f"Saved {len(indices)} frames to: {args.output}")
 

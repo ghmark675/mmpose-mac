@@ -1,13 +1,16 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from pseudo3d import (
     COCO17_JOINT_NAMES,
     adapt_rtmpose_keypoints,
-    mean_bone_length,
+    estimate_vertical_scale,
+    main,
     reconstruct_frame,
     reconstruct_sequence,
     save_keypoints3d,
@@ -60,7 +63,7 @@ class Pseudo3DTest(unittest.TestCase):
         expected = np.stack(
             (
                 fo_centered[:, 0],
-                (fo_centered[:, 1] + dtl_scaled[:, 1]) / 2,
+                fo_centered[:, 1],
                 dtl_scaled[:, 0],
             ),
             axis=1,
@@ -68,7 +71,30 @@ class Pseudo3DTest(unittest.TestCase):
         self.assertEqual(result.shape, (17, 3))
         self.assertEqual(result.dtype, np.float32)
         np.testing.assert_allclose(result, expected)
-        self.assertAlmostEqual(float(mean_bone_length(fo) / mean_bone_length(dtl)), 0.5)
+        self.assertAlmostEqual(float(estimate_vertical_scale(fo, dtl)), 0.5)
+
+    def test_vertical_scale_ignores_horizontal_projection_and_translation(self):
+        fo = sample(offset=(100, 200), scale=2)
+        dtl = sample(offset=(500, 700), scale=4)
+        dtl[:, 0] *= 7
+        self.assertAlmostEqual(float(estimate_vertical_scale(fo, dtl)), 0.5)
+        result = reconstruct_frame(fo, dtl)
+        np.testing.assert_allclose(result[:, :2], fo - fo[16])
+        np.testing.assert_allclose(result[:, 2], (dtl[:, 0] - dtl[16, 0]) * 0.5)
+
+    def test_sequence_uses_one_scale_and_preserves_fo_y(self):
+        fo = [sample(), sample()]
+        dtl = [sample(scale=2), sample(scale=2)]
+        dtl[1][:, 1] *= 1.1
+        points, _ = reconstruct_sequence(enumerate(fo), enumerate(dtl))
+        np.testing.assert_array_equal(points[0, :, 2], points[1, :, 2])
+        np.testing.assert_array_equal(points[:, :, 1], np.stack([p[:, 1] - p[16, 1] for p in fo]))
+
+    def test_horizontal_pose_cannot_determine_scale(self):
+        pose = sample()
+        pose[:, 1] = 100
+        with self.assertRaisesRegex(ValueError, "vertical spans"):
+            estimate_vertical_scale(pose, pose)
 
     def test_sequence_fixed_origin_and_indices(self):
         fo0, dtl0 = sample(), sample(scale=2)
@@ -97,6 +123,26 @@ class Pseudo3DTest(unittest.TestCase):
                 self.assertEqual(saved["keypoints3d"].dtype, np.float32)
                 np.testing.assert_array_equal(saved["frame_indices"], [9])
                 np.testing.assert_array_equal(saved["joint_names"], COCO17_JOINT_NAMES)
+
+    def test_manual_cli_smoothing_keeps_raw_reconstruction(self):
+        poses = [sample() for _ in range(13)]
+        poses[6][10, 0] += 35
+        frames = [{"frame_id": i, "instances": [{"keypoints": pose.tolist()}]}
+                  for i, pose in enumerate(poses)]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "poses.json"
+            source.write_text(json.dumps(frames))
+            output = root / "result.npz"
+            with patch("sys.argv", ["pseudo3d.py", str(source), str(source),
+                                    "-o", str(output), "--smooth-fps", "60"]):
+                main()
+            expected, ids = reconstruct_sequence(enumerate(poses), enumerate(poses))
+            with np.load(root / "result_raw.npz") as raw, np.load(output) as smoothed:
+                np.testing.assert_array_equal(raw["keypoints3d"], expected)
+                np.testing.assert_array_equal(smoothed["frame_indices"], ids)
+                self.assertAlmostEqual(float(smoothed["keypoints3d"][6, 10, 0]),
+                                       float(expected[6, 10, 0] - 18), places=5)
 
 
 if __name__ == "__main__":

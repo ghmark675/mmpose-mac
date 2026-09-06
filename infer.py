@@ -175,7 +175,8 @@ def run_image(args, det_session, pose_session, output):
     return predictions
 
 
-def run_video(args, det_session, pose_session, output):
+def run_video(args, det_session, pose_session, output=None):
+    """Run video inference, optionally writing an annotated video."""
     capture = cv2.VideoCapture(str(args.input))
     if not capture.isOpened():
         raise RuntimeError(f"Failed to read video: {args.input}")
@@ -185,12 +186,14 @@ def run_video(args, det_session, pose_session, output):
     fps = video_writer_fps(source_fps)
     if source_fps and not np.isclose(fps, source_fps):
         print(f"Output FPS adjusted from {source_fps:.6g} to {fps:g} for MPEG-4")
-    writer = cv2.VideoWriter(
-        str(output), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-    )
-    if not writer.isOpened():
-        capture.release()
-        raise RuntimeError(f"Failed to write video: {output}")
+    writer = None
+    if output is not None:
+        writer = cv2.VideoWriter(
+            str(output), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+        )
+        if not writer.isOpened():
+            capture.release()
+            raise RuntimeError(f"Failed to write video: {output}")
     frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     index = 0
     predictions = []
@@ -201,14 +204,16 @@ def run_video(args, det_session, pose_session, output):
         result, instances = infer(
             det_session, pose_session, frame, args.det_thr, args.kpt_thr
         )
-        writer.write(result)
+        if writer is not None:
+            writer.write(result)
         if args.json is not None:
             predictions.append({"frame_id": index, "instances": instances})
         index += 1
         print(f"\rProcessing: {index}/{frames or '?'}", end="", flush=True)
     print()
     capture.release()
-    writer.release()
+    if writer is not None:
+        writer.release()
     return predictions
 
 

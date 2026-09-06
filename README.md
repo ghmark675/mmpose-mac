@@ -31,6 +31,48 @@ eyes and ears. It is ignored by Git so each machine can customize it.
 
 ## Two-view pseudo-3D
 
+### One-command pipeline (recommended)
+
+Given frame-aligned front-on (FO) and down-the-line (DTL) videos, run:
+
+```bash
+python pipeline_3d.py fo.mp4 dtl.mp4 -o output_3d
+```
+
+Open `output_3d/index.html` in any modern browser. The pipeline loads the ONNX
+models once, infers both videos, reconstructs matching frame IDs, and creates a
+self-contained offline viewer. It also keeps the intermediate 2-D JSON files
+and both `keypoints3d_raw.npz` (before smoothing) and `keypoints3d.npz`
+(the final result used by the viewer and reprojection) for inspection or reuse.
+
+The pipeline applies quadratic Savitzky-Golay temporal smoothing after 3-D
+reconstruction by default. It uses NumPy, with no additional dependencies.
+The default window spans approximately 67 ms, converted using the original FO
+video FPS: 5 frames at 60 FPS, 9 at 120 FPS, and 17 at 240 FPS. Windows are odd
+and at least 5 frames, so the minimum spans more time at lower frame rates.
+Filtering is centered in time; sequence ends use local polynomial fits.
+Larger windows smooth more strongly and can reduce fast-motion detail.
+
+```bash
+python pipeline_3d.py fo.mp4 dtl.mp4 -o output_3d --smooth-window-ms 50
+python pipeline_3d.py fo.mp4 dtl.mp4 -o output_3d_raw --no-smooth
+```
+
+Missing frame IDs split the sequence into independent runs. Each run uses a
+smaller odd window when needed; runs shorter than 5 frames stay unchanged.
+No missing frames are filled, and no 2-D smoothing, confidence gating, or
+outlier correction is performed. Original 2-D JSON and overlays are retained.
+With `--no-smooth`, both NPZ files contain the raw reconstruction.
+
+Add `--save-pose-videos` to keep annotated FO/DTL MP4 files, or
+`--per-frame-origin` to remove whole-body translation. The two input videos
+must already be synchronized: frame 0 in FO is paired with frame 0 in DTL.
+
+Run `python pipeline_3d.py --help` for model, threshold, config, and output
+options.
+
+### Manual stages
+
 Run the existing inference independently for the front (FO) and down-the-line
 (DTL) videos, then reconstruct matching frames:
 
@@ -39,6 +81,17 @@ python infer.py fo.mp4 --json fo.json
 python infer.py dtl.mp4 --json dtl.json
 python pseudo3d.py fo.json dtl.json -o keypoints3d.npz
 ```
+
+Manual reconstruction leaves smoothing off unless `--smooth-fps` is supplied,
+because the JSON files do not contain source FPS. To smooth existing inference
+results without running the models again, supply the original source FPS:
+
+```bash
+python pseudo3d.py fo.json dtl.json -o keypoints3d.npz --smooth-fps 240
+```
+
+This also saves `keypoints3d_raw.npz`. Add `--smooth-window-ms 50` to adjust the
+window. Use the actual input video FPS, rather than a desired playback rate.
 
 The default fixes each view's right ankle from the first valid frame, retaining
 whole-body translation. Use `--per-frame-origin` to center every frame at its
@@ -49,10 +102,14 @@ Python API:
 
 ```python
 from pseudo3d import load_infer_json, reconstruct_sequence, save_keypoints3d
+from smoothing import smooth_keypoints3d
 
 points, frame_ids = reconstruct_sequence(
     load_infer_json("fo.json"), load_infer_json("dtl.json")
 )
+save_keypoints3d("keypoints3d_raw.npz", points, frame_ids)
+# Optional: use the actual source FPS. reconstruct_sequence itself stays raw.
+points = smooth_keypoints3d(points, frame_ids, fps=240, window_ms=67)
 save_keypoints3d("keypoints3d.npz", points, frame_ids)
 ```
 
@@ -71,3 +128,31 @@ path.
 Viewer colors use `default_bone_color`; individual bones can override it in
 `bone_colors` with COCO index pairs such as `"5-6": "#60a5fa"`. The head joint
 and size are controlled by `head_joint` and `head_radius` in the same config.
+
+### 3D reprojection check
+
+The pipeline viewer includes synchronized FO/DTL source frames, a green 3D
+reprojection overlay, and an optional pink original 2D overlay. Use ‹ / › to
+step through valid frame pairs. Playback uses FO source FPS and original frame
+spacing; skipped reconstruction frames are omitted. Inputs must be frame-aligned.
+JPEG previews (up to 960 pixels per side, without audio) are embedded so the HTML
+works offline; long clips produce larger files.
+
+To add the comparison to an existing reconstruction:
+
+```bash
+python visualize_3d.py keypoints3d.npz -o comparison.html \
+  --fo-json fo.json --dtl-json dtl.json --fo-video fo.mov --dtl-video dtl.mov
+```
+
+Add `--per-frame-origin` only if the reconstruction used that option. The
+approximate projection restores the current pseudo-3D algorithm's origins and
+DTL scale from its original JSON inputs; it is not a calibrated camera model.
+
+Reconstruction keeps X/Y from FO and uses scaled DTL horizontal coordinates for
+Z. A single scale is fitted over all valid paired frames using corresponding
+body-joint vertical differences (least squares, excluding spans below 20% of
+each view's body height and opposite signs). This assumes aligned vertical
+axes, orthographic views, fixed camera scale, and no nonuniform image resizing.
+Y is not averaged. Regenerate old NPZ files before creating reprojection HTML
+with this version; the previous reconstruction used different scale/Y rules.
