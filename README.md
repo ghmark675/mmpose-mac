@@ -1,6 +1,6 @@
 # mmpose-mac
 
-RTMDet and RTMPose ONNX inference for images and videos.
+RTMDet and RTMPose ONNX inference for images and videos, with optional MotionBERT 3-D lifting.
 
 ## Setup
 
@@ -14,6 +14,7 @@ Place the models in `models/`:
 ```text
 models/rtmdet_m_person.onnx
 models/rtmpose_l_body8_384x288.onnx
+models/motionbert_h36m.onnx  # for the MotionBERT pipeline
 ```
 
 ## Usage
@@ -28,6 +29,51 @@ python infer.py input.mp4 --json keypoints.json
 If `keypoint_config.json` exists, JSON export keeps only its `visible_joints`.
 The included local config keeps the nose and all body joints while removing
 eyes and ears. It is ignored by Git so each machine can customize it.
+
+## Single-view MotionBERT 3-D
+
+```bash
+python pipeline_motionbert.py input.jpg -o output_motionbert
+python pipeline_motionbert.py input.mp4 -o output_motionbert
+python pipeline_motionbert.py input.mp4 -o output_motionbert --save-pose-video
+```
+
+Open `output_motionbert/index.html` to rotate, zoom, and play the 3-D skeleton
+at the source video FPS. Outputs also include full 2-D detections in
+`keypoints2d.json`, and 3-D poses in `keypoints3d.json` and `keypoints3d.npz`.
+Images additionally produce `pose.jpg`; `--save-pose-video` adds `pose.mp4`.
+The NPZ can also be opened with `python visualize_3d.py output_motionbert/keypoints3d.npz`.
+
+This pipeline targets one main person: it selects the largest detection at the
+first detected frame, then matches boxes by IoU (above 0.1). Unmatched frames
+reuse the last 2-D pose and have `detected=false` in the 3-D outputs. Leading
+frames without a person are skipped; original frame IDs are retained. This
+simple matching works best with a single person continuously in view; it does
+not provide identity tracking through crossings or large movements.
+
+MotionBERT runs directly in ONNX Runtime on CPU, without installing PyTorch or
+MMPose. It uses the full COCO-17 pose, converts it to H36M-17, and infers each
+frame from a centered 243-frame window with repeated boundary frames. A single
+image is repeated 243 times. Bbox normalization follows the supplied MMPose
+reference; `--no-bbox-norm` disables it. Use `--lift-model` to select another
+compatible ONNX file. This is an offline pipeline with one MotionBERT inference
+per output frame.
+
+The 3-D arrays are `N x 17 x 3`, in H36M joint order, relative to the pelvis,
+using camera axes (X right, Y down, Z away from the camera), recorded as
+`coordinate_system="camera"`. Values are in meters using the
+reference's default scale factor of 4; they are monocular estimates without
+camera calibration or global body translation. For FO input, the viewer flips
+Y and Z to match the two-view fusion viewer: Y upward, Z toward the FO camera.
+DTL and Top therefore use the same axis directions as fusion. This aligns view
+directions; single-view depth estimates can still differ from two-view poses.
+The viewer uses the H36M skeleton independently of the local COCO keypoint config.
+Older MotionBERT NPZ files are recognized by their H36M joint names; regenerate
+their HTML without rerunning inference:
+
+```bash
+python visualize_3d.py results/hj_mb/keypoints3d.npz -o results/hj_mb/index.html
+```
 
 ## Two-view pseudo-3D
 

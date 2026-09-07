@@ -1,4 +1,4 @@
-"""Create a dependency-free interactive HTML viewer for pseudo-3D NPZ files."""
+"""Create a dependency-free interactive HTML viewer for 3D NPZ files."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from keypoint_config import load_keypoint_config
+from motionbert import H36M_JOINT_NAMES
 
 
 SKELETON = (
@@ -22,7 +23,7 @@ SKELETON = (
 
 
 def load_keypoints3d(path: str | Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Load and validate the pseudo-3D NPZ schema without enabling pickle."""
+    """Load and validate the 3D NPZ schema without enabling pickle."""
     with np.load(path, allow_pickle=False) as data:
         required = {"keypoints3d", "frame_indices", "joint_names"}
         missing = required.difference(data.files)
@@ -100,19 +101,38 @@ def create_viewer_html(
 ) -> Path:
     """Write a self-contained, offline HTML skeleton viewer."""
     points, frame_indices, joint_names = load_keypoints3d(npz_path)
-    # Image coordinates point down. Flip Y once so the viewer uses Y-up.
+    with np.load(npz_path, allow_pickle=False) as data:
+        skeleton = np.asarray(data["skeleton"]) if "skeleton" in data else None
+        fps = float(data["fps"]) if "fps" in data else 30.0
+        head = str(data["head_joint"].item()) if "head_joint" in data else None
+        coordinates = (str(data["coordinate_system"].item()) if "coordinate_system" in data
+                       else "camera" if joint_names == H36M_JOINT_NAMES.tolist() else "pseudo3d")
+    if coordinates not in {"camera", "pseudo3d"}:
+        raise ValueError(f"Unknown coordinate system: {coordinates}")
+    if not np.isfinite(fps) or fps <= 0:
+        raise ValueError("fps must be a positive finite number")
+    if skeleton is not None and (
+        skeleton.ndim != 2 or skeleton.shape[1] != 2
+        or not np.issubdtype(skeleton.dtype, np.integer)
+        or np.any(skeleton < 0) or np.any(skeleton >= len(joint_names))
+    ):
+        raise ValueError("skeleton must contain pairs of valid joint indices")
+    # Camera depth points away from FO; fusion Z points toward FO.
     display_points = points.copy()
     display_points[:, :, 1] *= -1
-    config = load_keypoint_config(config_path) or {}
+    if coordinates == "camera":
+        display_points[:, :, 2] *= -1
+    config = (load_keypoint_config(config_path) or {}) if skeleton is None else {}
     payload = {
         "points": display_points.tolist(),
         "comparison": comparison,
         "frameIndices": frame_indices.tolist(),
         "jointNames": joint_names,
-        "bones": SKELETON,
+        "bones": SKELETON if skeleton is None else skeleton.tolist(),
+        "fps": fps,
         "source": Path(npz_path).name,
         "visible": config.get("visible_joint_indices", list(range(17))),
-        "head": config.get("head_joint", "nose"),
+        "head": head or config.get("head_joint", "head" if "head" in joint_names else "nose"),
         "headRadius": config.get("head_radius", 11),
         "boneColor": config.get("default_bone_color", "#55d6be"),
         "boneColors": config.get("bone_colors", {}),
@@ -127,7 +147,7 @@ def create_viewer_html(
 _HTML_TEMPLATE = r'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pseudo-3D Skeleton Viewer</title>
+<title>3D Skeleton Viewer</title>
 <style>
 :root{color-scheme:dark;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:#090d16;color:#e8eef9;overflow:hidden}
@@ -146,7 +166,7 @@ input[type=range]{flex:1;min-width:80px}.status{min-width:185px;font-variant-num
 font-size:13px;color:#cbd5e1}.source{font-size:12px;color:#64748b;margin-top:7px}
 @media(max-width:620px){.hint{display:none}.panel{left:8px;right:8px;bottom:8px}.status{min-width:120px}}
 </style></head><body>
-<canvas id="view"></canvas><div class="title">Pseudo-3D Skeleton</div>
+<canvas id="view"></canvas><div class="title">3D Skeleton</div>
 <div class="hint">拖动旋转 · 滚轮缩放 · 双击复位</div>
 <section id="comparison"><div class="row"><select id="camera"><option value="fo">FO 原视频</option><option value="dtl">DTL 原视频</option></select>
 <label><input type="checkbox" id="show3d" checked>3D 重投影（绿）</label><label><input type="checkbox" id="show2d">原始 2D（粉）</label></div>
@@ -167,7 +187,7 @@ const plotWidth=()=>data.comparison?innerWidth/2:innerWidth;
 let frame=0,playing=false,last=0,acc=0,yaw=0,pitch=0,zoom=1,drag=false,px=0,py=0,view='fo';
 const all=data.points.flat(),lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
 for(const p of all)for(let k=0;k<3;k++){if(p[k]<lo[k])lo[k]=p[k];if(p[k]>hi[k])hi[k]=p[k]}
-const center=[0,1,2].map(k=>(lo[k]+hi[k])/2);let extent=1;
+const center=[0,1,2].map(k=>(lo[k]+hi[k])/2);let extent=1e-6;
 for(const p of all)for(let k=0;k<3;k++)extent=Math.max(extent,Math.abs(p[k]-center[k]));
 function resize(){const d=devicePixelRatio||1;canvas.width=plotWidth()*d;canvas.height=innerHeight*d;ctx.setTransform(d,0,0,d,0,0);draw()}
 function project(p){let x=(p[0]-center[0])/extent,y=(p[1]-center[1])/extent,z=(p[2]-center[2])/extent;
@@ -202,7 +222,7 @@ if(data.comparison){document.body.classList.add('compare');drawComparison()}
 camera.onchange=show3d.onchange=show2d.onchange=drawComparison;
 function setFrame(v){frame=Math.max(0,Math.min(data.points.length-1,v|0));slider.value=frame;draw();drawComparison()}
 function toggle(){playing=!playing;playBtn.textContent=playing?'⏸ 暂停':'▶ 播放';last=performance.now();acc=0;if(playing)requestAnimationFrame(tick)}
-function tick(t){if(!playing)return;acc+=(t-last)*Number(speedEl.value);last=t;const fps=data.comparison?data.comparison.fo.fps:30;let duration=()=>1000*(frame+1<data.points.length?data.frameIndices[frame+1]-data.frameIndices[frame]:1)/fps;while(acc>=duration()){acc-=duration();setFrame((frame+1)%data.points.length)}requestAnimationFrame(tick)}
+function tick(t){if(!playing)return;acc+=(t-last)*Number(speedEl.value);last=t;const fps=data.comparison?data.comparison.fo.fps:data.fps;let duration=()=>1000*(frame+1<data.points.length?data.frameIndices[frame+1]-data.frameIndices[frame]:1)/fps;while(acc>=duration()){acc-=duration();setFrame((frame+1)%data.points.length)}requestAnimationFrame(tick)}
 document.querySelector('#prev').onclick=()=>{if(playing)toggle();setFrame(frame-1)};document.querySelector('#next').onclick=()=>{if(playing)toggle();setFrame(frame+1)};
 playBtn.onclick=toggle;slider.oninput=()=>setFrame(Number(slider.value));
 document.querySelectorAll('.view').forEach(b=>b.onclick=()=>{view=b.dataset.view;if(view==='fo'||view==='dtl'){camera.value=view;drawComparison()}document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x===b));draw()});
@@ -214,7 +234,7 @@ canvas.ondblclick=()=>{view='fo';yaw=0;pitch=0;zoom=1;document.querySelectorAll(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize pseudo-3D keypoints in a browser")
+    parser = argparse.ArgumentParser(description="Visualize 3D keypoints in a browser")
     parser.add_argument("input", type=Path, help="keypoints3d.npz")
     parser.add_argument("-o", "--output", type=Path, help="output HTML path")
     parser.add_argument("--config", type=Path, default=Path("keypoint_config.json"))

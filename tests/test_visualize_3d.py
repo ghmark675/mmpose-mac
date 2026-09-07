@@ -6,8 +6,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from motionbert import H36M_JOINT_NAMES
 from pseudo3d import COCO17_JOINT_NAMES, reconstruct_sequence
-from visualize_3d import build_comparison, create_viewer_html, load_keypoints3d
+from visualize_3d import SKELETON, build_comparison, create_viewer_html, load_keypoints3d
 
 
 class Visualize3DTest(unittest.TestCase):
@@ -15,6 +16,9 @@ class Visualize3DTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             npz = Path(directory) / "keypoints3d.npz"
             html = Path(directory) / "keypoints3d.html"
+            config = Path(directory) / "config.json"
+            config.write_text(json.dumps({"visible_joints": ["nose", "left_ankle"],
+                                          "bone_colors": {"0-15": "#ffffff"}}))
             points = np.arange(2 * 17 * 3, dtype=np.float32).reshape(2, 17, 3)
             np.savez(npz, keypoints3d=points, frame_indices=[4, 9],
                      joint_names=COCO17_JOINT_NAMES)
@@ -22,8 +26,14 @@ class Visualize3DTest(unittest.TestCase):
             np.testing.assert_array_equal(loaded, points)
             np.testing.assert_array_equal(indices, [4, 9])
             self.assertEqual(len(names), 17)
-            create_viewer_html(npz, html)
+            create_viewer_html(npz, html, config)
             content = html.read_text(encoding="utf-8")
+            payload = json.loads(content.split("const data=", 1)[1].split(",canvas=", 1)[0])
+            self.assertEqual(payload["bones"], [list(bone) for bone in SKELETON])
+            self.assertEqual(payload["visible"], [0, 15])
+            self.assertEqual(payload["boneColors"], {"0-15": "#ffffff"})
+            self.assertEqual(payload["head"], "nose")
+            self.assertEqual(payload["fps"], 30)
             self.assertIn("原始帧", content)
             self.assertIn('"frameIndices":[4,9]', content)
             self.assertIn("drawAxes()", content)
@@ -35,6 +45,59 @@ class Visualize3DTest(unittest.TestCase):
             self.assertIn("innerHeight-115", content)
             self.assertNotIn("__DATA__", content)
             self.assertNotIn("https://", content)
+
+    def test_motionbert_metadata_overrides_coco_config(self):
+        names = ["root", "right_hip", "right_knee", "right_ankle", "left_hip",
+                 "left_knee", "left_ankle", "spine", "thorax", "neck", "head",
+                 "left_shoulder", "left_elbow", "left_wrist", "right_shoulder",
+                 "right_elbow", "right_wrist"]
+        bones = [[0, 1], [1, 2], [2, 3], [0, 4], [4, 5], [5, 6], [0, 7],
+                 [7, 8], [8, 9], [9, 10], [8, 11], [11, 12], [12, 13],
+                 [8, 14], [14, 15], [15, 16]]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            npz, html, config = root / "pose.npz", root / "pose.html", root / "config.json"
+            config.write_text(json.dumps({"visible_joints": ["nose"], "head_joint": "nose",
+                                          "bone_colors": {"0-1": "#ffffff"}}))
+            points = np.full((2, 17, 3), 0.1, dtype=np.float32)
+            for metadata, expected_head in (({}, "head"), ({"head_joint": "neck"}, "neck")):
+                with self.subTest(metadata=metadata):
+                    np.savez(npz, keypoints3d=points, frame_indices=[0, 2], joint_names=names,
+                             skeleton=bones, fps=24.0, units="meters", **metadata)
+                    create_viewer_html(npz, html, config)
+                    content = html.read_text(encoding="utf-8")
+                    payload = json.loads(content.split("const data=", 1)[1].split(",canvas=", 1)[0])
+                    self.assertEqual(payload["bones"], bones)
+                    self.assertEqual(payload["visible"], list(range(17)))
+                    self.assertEqual(payload["head"], expected_head)
+                    self.assertEqual(payload["boneColors"], {})
+                    self.assertEqual(payload["fps"], 24)
+                    np.testing.assert_allclose(payload["points"], points * [1, -1, 1])
+
+    def test_viewer_coordinate_conventions_preserve_source(self):
+        points = np.zeros((1, 17, 3), dtype=np.float32)
+        points[0, [0, 1, 13]] = [[-0.2, 0.1, 0.3], [0.4, -0.5, -0.6], [-0.7, -0.8, 0.9]]
+        camera = np.zeros_like(points)
+        camera[0, [0, 1, 13]] = [[-0.2, -0.1, -0.3], [0.4, 0.5, 0.6], [-0.7, 0.8, -0.9]]
+        fusion = np.zeros_like(points)
+        fusion[0, [0, 1, 13]] = [[-0.2, -0.1, 0.3], [0.4, 0.5, -0.6], [-0.7, 0.8, 0.9]]
+        cases = (
+            ({"coordinate_system": "camera"}, COCO17_JOINT_NAMES, camera),
+            ({}, H36M_JOINT_NAMES, camera),
+            ({"coordinate_system": "pseudo3d"}, H36M_JOINT_NAMES, fusion),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            npz, html = Path(directory) / "pose.npz", Path(directory) / "pose.html"
+            for metadata, names, expected in cases:
+                with self.subTest(metadata=metadata):
+                    np.savez(npz, keypoints3d=points, frame_indices=[7],
+                             joint_names=names, **metadata)
+                    create_viewer_html(npz, html)
+                    content = html.read_text(encoding="utf-8")
+                    payload = json.loads(content.split("const data=", 1)[1].split(",canvas=", 1)[0])
+                    np.testing.assert_allclose(payload["points"], expected)
+                    with np.load(npz, allow_pickle=False) as saved:
+                        np.testing.assert_array_equal(saved["keypoints3d"], points)
 
     def test_reprojection_restores_pixels_for_both_origin_modes(self):
         with tempfile.TemporaryDirectory() as directory:
