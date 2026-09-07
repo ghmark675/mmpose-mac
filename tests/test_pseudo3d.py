@@ -88,7 +88,9 @@ class Pseudo3DTest(unittest.TestCase):
         dtl[1][:, 1] *= 1.1
         points, _ = reconstruct_sequence(enumerate(fo), enumerate(dtl))
         np.testing.assert_array_equal(points[0, :, 2], points[1, :, 2])
-        np.testing.assert_array_equal(points[:, :, 1], np.stack([p[:, 1] - p[16, 1] for p in fo]))
+        np.testing.assert_array_equal(
+            points[:, :, 1], np.stack([p[:, 1] - p[16, 1] for p in fo])
+        )
 
     def test_horizontal_pose_cannot_determine_scale(self):
         pose = sample()
@@ -127,22 +129,37 @@ class Pseudo3DTest(unittest.TestCase):
     def test_manual_cli_smoothing_keeps_raw_reconstruction(self):
         poses = [sample() for _ in range(13)]
         poses[6][10, 0] += 35
-        frames = [{"frame_id": i, "instances": [{"keypoints": pose.tolist()}]}
-                  for i, pose in enumerate(poses)]
+        frames = [
+            {"frame_id": i, "instances": [{"keypoints": pose.tolist()}]}
+            for i, pose in enumerate(poses)
+        ]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "poses.json"
             source.write_text(json.dumps(frames))
             output = root / "result.npz"
-            with patch("sys.argv", ["pseudo3d.py", str(source), str(source),
-                                    "-o", str(output), "--smooth-fps", "60"]):
+            with patch(
+                "sys.argv",
+                [
+                    "pseudo3d.py",
+                    str(source),
+                    str(source),
+                    "-o",
+                    str(output),
+                    "--smooth-fps",
+                    "60",
+                ],
+            ):
                 main()
             expected, ids = reconstruct_sequence(enumerate(poses), enumerate(poses))
             with np.load(root / "result_raw.npz") as raw, np.load(output) as smoothed:
                 np.testing.assert_array_equal(raw["keypoints3d"], expected)
                 np.testing.assert_array_equal(smoothed["frame_indices"], ids)
-                self.assertAlmostEqual(float(smoothed["keypoints3d"][6, 10, 0]),
-                                       float(expected[6, 10, 0] - 18), places=5)
+                self.assertAlmostEqual(
+                    float(smoothed["keypoints3d"][6, 10, 0]),
+                    float(expected[6, 10, 0] - 18),
+                    places=5,
+                )
 
 
 if __name__ == "__main__":

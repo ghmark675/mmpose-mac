@@ -41,7 +41,9 @@ class MotionBERTTest(unittest.TestCase):
             np.testing.assert_array_equal(
                 window[:, 0, 0], np.clip(np.arange(index - 121, index + 122), 0, 299)
             )
-        np.testing.assert_array_equal(extract_sequence(encoded[:1], 0), np.zeros((243, 1, 1)))
+        np.testing.assert_array_equal(
+            extract_sequence(encoded[:1], 0), np.zeros((243, 1, 1))
+        )
 
     def test_decode_matches_motionbert_rootrel_and_meter_scale(self):
         output = np.full((17, 3), [0.25, -0.5, 0.75], np.float32)
@@ -59,7 +61,9 @@ class MotionBERTTest(unittest.TestCase):
             windows.append(window.copy())
             return [window]
 
-        session = SimpleNamespace(get_inputs=lambda: [SimpleNamespace(name="pose_2d")], run=run)
+        session = SimpleNamespace(
+            get_inputs=lambda: [SimpleNamespace(name="pose_2d")], run=run
+        )
         points = np.tile([[[100, 200]]], (3, 17, 1)).astype(np.float32)
         points[1] += [100, 100]
         points[2] += [200, 200]
@@ -67,9 +71,15 @@ class MotionBERTTest(unittest.TestCase):
         self.assertEqual(result.shape, (3, 17, 3))
         self.assertEqual(result.dtype, np.float32)
         np.testing.assert_array_equal(result[:, 0], 0)
-        np.testing.assert_allclose(result[:, 1], [[-1.6, -0.4, 2], [-1.2, 0, 2], [-0.8, 0.4, 2]], atol=1e-6)
-        np.testing.assert_array_equal(windows[0][0, :122], np.repeat(windows[0][0, :1], 122, axis=0))
-        np.testing.assert_array_equal(windows[-1][0, 121:], np.repeat(windows[-1][0, -1:], 122, axis=0))
+        np.testing.assert_allclose(
+            result[:, 1], [[-1.6, -0.4, 2], [-1.2, 0, 2], [-0.8, 0.4, 2]], atol=1e-6
+        )
+        np.testing.assert_array_equal(
+            windows[0][0, :122], np.repeat(windows[0][0, :1], 122, axis=0)
+        )
+        np.testing.assert_array_equal(
+            windows[-1][0, 121:], np.repeat(windows[-1][0, -1:], 122, axis=0)
+        )
         boxes = np.tile([0, 0, 1000, 600], (3, 1))
         normalized = lift_sequence(session, points, boxes, 1000, 600)
         self.assertFalse(np.allclose(result, normalized))

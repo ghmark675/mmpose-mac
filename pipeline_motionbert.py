@@ -30,8 +30,11 @@ def select_person_sequence(predictions):
                 selected = instances[int(areas.argmax())]
             else:
                 box = np.asarray(last["bbox"], dtype=np.float32)
-                overlap = np.maximum(0, np.minimum(boxes[:, 2:], box[2:])
-                                     - np.maximum(boxes[:, :2], box[:2]))
+                overlap = np.maximum(
+                    0,
+                    np.minimum(boxes[:, 2:], box[2:])
+                    - np.maximum(boxes[:, :2], box[:2]),
+                )
                 intersection = np.prod(overlap, axis=1)
                 iou = intersection / np.maximum(
                     areas + np.prod(box[2:] - box[:2]) - intersection, 1e-6
@@ -49,8 +52,12 @@ def select_person_sequence(predictions):
         detected.append(selected is not None)
     if not keypoints:
         raise ValueError("No person detected in the input")
-    return (np.stack(keypoints), np.asarray(bboxes, dtype=np.float32),
-            np.asarray(frame_indices, dtype=np.int64), np.asarray(detected, dtype=bool))
+    return (
+        np.stack(keypoints),
+        np.asarray(bboxes, dtype=np.float32),
+        np.asarray(frame_indices, dtype=np.int64),
+        np.asarray(detected, dtype=bool),
+    )
 
 
 def run_pipeline(args):
@@ -88,9 +95,13 @@ def run_pipeline(args):
     print("Loading ONNX models...")
     det_session = create_session(args.det_model)
     pose_session = create_session(args.pose_model)
-    lift_session = ort.InferenceSession(str(args.lift_model), providers=["CPUExecutionProvider"])
+    lift_session = ort.InferenceSession(
+        str(args.lift_model), providers=["CPUExecutionProvider"]
+    )
     if is_image:
-        result, instances = infer(det_session, pose_session, image, args.det_thr, args.kpt_thr)
+        result, instances = infer(
+            det_session, pose_session, image, args.det_thr, args.kpt_thr
+        )
         paths["image"] = output / "pose.jpg"
         if not cv2.imwrite(str(paths["image"]), result):
             raise RuntimeError(f"Cannot write image: {paths['image']}")
@@ -98,42 +109,86 @@ def run_pipeline(args):
     else:
         if args.save_pose_video:
             paths["video"] = output / "pose.mp4"
-        infer_args = SimpleNamespace(input=args.input, det_thr=args.det_thr,
-                                     kpt_thr=args.kpt_thr, json=True)
-        predictions = run_video(infer_args, det_session, pose_session, paths.get("video"))
+        infer_args = SimpleNamespace(
+            input=args.input, det_thr=args.det_thr, kpt_thr=args.kpt_thr, json=True
+        )
+        predictions = run_video(
+            infer_args, det_session, pose_session, paths.get("video")
+        )
     paths["json_2d"].write_text(json.dumps(predictions), encoding="utf-8")
     keypoints, bboxes, frame_indices, detected = select_person_sequence(predictions)
-    print(f"Lifting {len(keypoints)} frames with MotionBERT ({int((~detected).sum())} filled)...")
-    points = lift_sequence(lift_session, keypoints, bboxes, width, height,
-                           bbox_norm=not args.no_bbox_norm)
+    print(
+        f"Lifting {len(keypoints)} frames with MotionBERT ({int((~detected).sum())} filled)..."
+    )
+    points = lift_sequence(
+        lift_session, keypoints, bboxes, width, height, bbox_norm=not args.no_bbox_norm
+    )
     np.savez_compressed(
-        paths["npz"], keypoints3d=points, frame_indices=frame_indices,
-        joint_names=H36M_JOINT_NAMES, skeleton=H36M_SKELETON, fps=fps,
-        units="meters", head_joint="head", detected=detected,
+        paths["npz"],
+        keypoints3d=points,
+        frame_indices=frame_indices,
+        joint_names=H36M_JOINT_NAMES,
+        skeleton=H36M_SKELETON,
+        fps=fps,
+        units="meters",
+        head_joint="head",
+        detected=detected,
         coordinate_system="camera",
     )
-    frames = [dict(frame_id=int(i), detected=bool(valid), keypoints_3d=pose.tolist())
-              for i, valid, pose in zip(frame_indices, detected, points)]
-    paths["json_3d"].write_text(json.dumps(dict(
-        units="meters", root_relative=True, joint_names=H36M_JOINT_NAMES.tolist(),
-        coordinate_system="camera", image_size=[width, height], fps=fps, frames=frames,
-    )), encoding="utf-8")
+    frames = [
+        dict(frame_id=int(i), detected=bool(valid), keypoints_3d=pose.tolist())
+        for i, valid, pose in zip(frame_indices, detected, points)
+    ]
+    paths["json_3d"].write_text(
+        json.dumps(
+            dict(
+                units="meters",
+                root_relative=True,
+                joint_names=H36M_JOINT_NAMES.tolist(),
+                coordinate_system="camera",
+                image_size=[width, height],
+                fps=fps,
+                frames=frames,
+            )
+        ),
+        encoding="utf-8",
+    )
     create_viewer_html(paths["npz"], paths["html"])
     print(f"Done: {len(points)} frames\nHTML: {paths['html']}")
     return paths
 
 
 def main():
-    parser = argparse.ArgumentParser(description="RTMDet + RTMPose + MotionBERT 3-D inference")
-    parser.add_argument("input", type=Path, help="image or video containing one main person")
-    parser.add_argument("-o", "--output-dir", type=Path, default=Path("output_motionbert"))
-    parser.add_argument("--det-model", type=Path, default=ROOT / "models/rtmdet_m_person.onnx")
-    parser.add_argument("--pose-model", type=Path, default=ROOT / "models/rtmpose_l_body8_384x288.onnx")
-    parser.add_argument("--lift-model", type=Path, default=ROOT / "models/motionbert_h36m.onnx")
+    parser = argparse.ArgumentParser(
+        description="RTMDet + RTMPose + MotionBERT 3-D inference"
+    )
+    parser.add_argument(
+        "input", type=Path, help="image or video containing one main person"
+    )
+    parser.add_argument(
+        "-o", "--output-dir", type=Path, default=Path("output_motionbert")
+    )
+    parser.add_argument(
+        "--det-model", type=Path, default=ROOT / "models/rtmdet_m_person.onnx"
+    )
+    parser.add_argument(
+        "--pose-model", type=Path, default=ROOT / "models/rtmpose_l_body8_384x288.onnx"
+    )
+    parser.add_argument(
+        "--lift-model", type=Path, default=ROOT / "models/motionbert_h36m.onnx"
+    )
     parser.add_argument("--det-thr", type=float, default=0.4)
     parser.add_argument("--kpt-thr", type=float, default=0.3)
-    parser.add_argument("--no-bbox-norm", action="store_true", help="use raw pixel coordinates for lifting")
-    parser.add_argument("--save-pose-video", action="store_true", help="also save a 2-D pose overlay video")
+    parser.add_argument(
+        "--no-bbox-norm",
+        action="store_true",
+        help="use raw pixel coordinates for lifting",
+    )
+    parser.add_argument(
+        "--save-pose-video",
+        action="store_true",
+        help="also save a 2-D pose overlay video",
+    )
     run_pipeline(parser.parse_args())
 
 

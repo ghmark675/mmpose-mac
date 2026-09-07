@@ -39,7 +39,6 @@ COCO17_JOINT_NAMES = np.asarray(
 )
 
 
-
 def _validate_keypoints(points: Any) -> np.ndarray:
     points = np.asarray(points, dtype=np.float32)
     if points.ndim == 3 and points.shape[0] == 1:
@@ -72,9 +71,13 @@ def adapt_rtmpose_keypoints(
                 compact = np.asarray(points, dtype=np.float32)
                 indices = np.asarray(output["keypoint_indices"], dtype=np.int64)
                 if compact.shape != (len(indices), 2):
-                    raise ValueError("filtered keypoints and keypoint_indices do not match")
+                    raise ValueError(
+                        "filtered keypoints and keypoint_indices do not match"
+                    )
                 if 0 not in indices:
-                    raise ValueError("filtered keypoints must retain nose (COCO index 0)")
+                    raise ValueError(
+                        "filtered keypoints must retain nose (COCO index 0)"
+                    )
                 # Hidden face slots are irrelevant to scale/reconstruction and
                 # share the nose coordinate to preserve the COCO-17 array shape.
                 nose = compact[np.flatnonzero(indices == 0)[0]]
@@ -112,9 +115,11 @@ def estimate_vertical_scale(fo_points: Any, dtl_points: Any) -> np.float32:
         raise ValueError("scale requires matching finite poses")
     a, b = np.triu_indices(12, 1)
     dy_fo, dy_dtl = fo[:, a] - fo[:, b], dtl[:, a] - dtl[:, b]
-    valid = ((np.abs(dy_fo) > np.maximum(np.ptp(fo, axis=1)[:, None] * 0.2, 1e-6))
-             & (np.abs(dy_dtl) > np.maximum(np.ptp(dtl, axis=1)[:, None] * 0.2, 1e-6))
-             & (dy_fo * dy_dtl > 0))
+    valid = (
+        (np.abs(dy_fo) > np.maximum(np.ptp(fo, axis=1)[:, None] * 0.2, 1e-6))
+        & (np.abs(dy_dtl) > np.maximum(np.ptp(dtl, axis=1)[:, None] * 0.2, 1e-6))
+        & (dy_fo * dy_dtl > 0)
+    )
     if not valid.any():
         raise ValueError("no usable corresponding vertical spans")
     x, y = dy_dtl[valid], dy_fo[valid]
@@ -181,11 +186,16 @@ def reconstruct_sequence(
         return np.empty((0, 17, 3), dtype=np.float32), np.asarray([], dtype=np.int64)
     fo_poses, dtl_poses = zip(*pairs)
     scale = estimate_vertical_scale(fo_poses, dtl_poses)
-    points = [reconstruct_frame(
-        fo, dtl, scale=scale,
-        fo_origin=pairs[0][0][16] if fixed_origin else None,
-        dtl_origin=pairs[0][1][16] if fixed_origin else None,
-    ) for fo, dtl in pairs]
+    points = [
+        reconstruct_frame(
+            fo,
+            dtl,
+            scale=scale,
+            fo_origin=pairs[0][0][16] if fixed_origin else None,
+            dtl_origin=pairs[0][1][16] if fixed_origin else None,
+        )
+        for fo, dtl in pairs
+    ]
     return np.stack(points), np.asarray(valid_indices, dtype=np.int64)
 
 
@@ -231,11 +241,13 @@ def main() -> None:
     parser.add_argument("dtl_json", type=Path, help="DTL output from infer.py --json")
     parser.add_argument("-o", "--output", type=Path, default=Path("keypoints3d.npz"))
     parser.add_argument(
-        "--smooth-fps", type=float,
+        "--smooth-fps",
+        type=float,
         help="enable 3-D SG smoothing using this source FPS (JSON has no FPS metadata)",
     )
     parser.add_argument(
-        "--smooth-window-ms", type=float,
+        "--smooth-window-ms",
+        type=float,
         help="SG window time span in milliseconds (default: 67; requires --smooth-fps)",
     )
     parser.add_argument(
@@ -246,7 +258,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.smooth_window_ms is not None and args.smooth_fps is None:
         parser.error("--smooth-window-ms requires --smooth-fps")
-    window_ms = DEFAULT_WINDOW_MS if args.smooth_window_ms is None else args.smooth_window_ms
+    window_ms = (
+        DEFAULT_WINDOW_MS if args.smooth_window_ms is None else args.smooth_window_ms
+    )
     if args.smooth_fps is not None:
         window_frames = savgol_window_length(args.smooth_fps, window_ms)
     points, indices = reconstruct_sequence(
@@ -257,7 +271,9 @@ def main() -> None:
     if args.smooth_fps is not None:
         raw_path = args.output.with_name(f"{args.output.stem}_raw{args.output.suffix}")
         save_keypoints3d(raw_path, points, indices)
-        points = smooth_keypoints3d(points, indices, fps=args.smooth_fps, window_ms=window_ms)
+        points = smooth_keypoints3d(
+            points, indices, fps=args.smooth_fps, window_ms=window_ms
+        )
         print(f"Smoothed 3-D with quadratic Savitzky-Golay ({window_frames} frames)")
         print(f"Raw reconstruction: {raw_path}")
     save_keypoints3d(args.output, points, indices)

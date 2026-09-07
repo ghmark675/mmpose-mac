@@ -101,12 +101,19 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Path]:
         )
     save_keypoints3d(paths["raw_npz"], points, frame_indices)
     if smoothing:
-        print(f"\nSmoothing 3-D: quadratic Savitzky-Golay, "
-              f"{window_frames} frames at {fps:g} FPS (short runs use smaller windows)")
+        print(
+            f"\nSmoothing 3-D: quadratic Savitzky-Golay, "
+            f"{window_frames} frames at {fps:g} FPS (short runs use smaller windows)"
+        )
         points = smooth_keypoints3d(points, frame_indices, fps=fps, window_ms=window_ms)
     save_keypoints3d(paths["npz"], points, frame_indices)
     comparison = build_comparison(
-        points, frame_indices, paths["fo_json"], paths["dtl_json"], fo_video, dtl_video,
+        points,
+        frame_indices,
+        paths["fo_json"],
+        paths["dtl_json"],
+        fo_video,
+        dtl_video,
         per_frame_origin=args.per_frame_origin,
     )
     create_viewer_html(paths["npz"], paths["html"], config_path, comparison=comparison)
@@ -122,33 +129,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("fo_video", type=Path, help="front-on (FO) video")
     parser.add_argument("dtl_video", type=Path, help="down-the-line (DTL) video")
     parser.add_argument(
-        "-o", "--output-dir", type=Path, default=Path("output_3d"),
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=Path("output_3d"),
         help="artifact directory (default: output_3d)",
     )
     parser.add_argument(
         "--det-model", type=Path, default=ROOT / "models/rtmdet_m_person.onnx"
     )
     parser.add_argument(
-        "--pose-model", type=Path,
+        "--pose-model",
+        type=Path,
         default=ROOT / "models/rtmpose_l_body8_384x288.onnx",
     )
     parser.add_argument("--config", type=Path, default=ROOT / "keypoint_config.json")
     parser.add_argument("--det-thr", type=float, default=0.4)
     parser.add_argument("--kpt-thr", type=float, default=0.3)
     parser.add_argument(
-        "--no-smooth", action="store_true",
+        "--no-smooth",
+        action="store_true",
         help="disable 3-D temporal smoothing (enabled by default)",
     )
     parser.add_argument(
-        "--smooth-window-ms", type=float, default=DEFAULT_WINDOW_MS,
+        "--smooth-window-ms",
+        type=float,
+        default=DEFAULT_WINDOW_MS,
         help="SG window time span in milliseconds (default: 67; minimum 5 frames)",
     )
     parser.add_argument(
-        "--per-frame-origin", action="store_true",
+        "--per-frame-origin",
+        action="store_true",
         help="center every frame independently instead of retaining translation",
     )
     parser.add_argument(
-        "--save-pose-videos", action="store_true",
+        "--save-pose-videos",
+        action="store_true",
         help="also save FO/DTL videos with 2-D pose overlays",
     )
     return parser.parse_args()

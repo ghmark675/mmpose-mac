@@ -12,10 +12,17 @@ class KeypointConfigTest(unittest.TestCase):
             path = Path(directory) / "config.json"
             path.write_text(json.dumps({"visible_joints": ["nose", "right_ankle"]}))
             config = load_keypoint_config(path)
-            predictions = [{"frame_id": 3, "instances": [{
-                "keypoints": [[i, i] for i in range(17)],
-                "keypoint_scores": list(range(17)),
-            }]}]
+            predictions = [
+                {
+                    "frame_id": 3,
+                    "instances": [
+                        {
+                            "keypoints": [[i, i] for i in range(17)],
+                            "keypoint_scores": list(range(17)),
+                        }
+                    ],
+                }
+            ]
             filter_predictions(predictions, config)
             instance = predictions[0]["instances"][0]
             self.assertEqual(instance["keypoint_indices"], [0, 16])

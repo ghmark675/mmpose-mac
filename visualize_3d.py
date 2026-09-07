@@ -15,10 +15,24 @@ from motionbert import H36M_JOINT_NAMES
 
 
 SKELETON = (
-    (0, 1), (0, 2), (1, 3), (2, 4), (0, 5), (0, 6),
-    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
-    (5, 11), (6, 12), (11, 12),
-    (11, 13), (13, 15), (12, 14), (14, 16),
+    (0, 1),
+    (0, 2),
+    (1, 3),
+    (2, 4),
+    (0, 5),
+    (0, 6),
+    (5, 6),
+    (5, 7),
+    (7, 9),
+    (6, 8),
+    (8, 10),
+    (5, 11),
+    (6, 12),
+    (11, 12),
+    (11, 13),
+    (13, 15),
+    (12, 14),
+    (14, 16),
 )
 
 
@@ -51,22 +65,36 @@ def _safe_json(value: Any) -> str:
     )
 
 
-def build_comparison(points, indices, fo_json, dtl_json, fo_video, dtl_video,
-                     *, per_frame_origin=False):
+def build_comparison(
+    points, indices, fo_json, dtl_json, fo_video, dtl_video, *, per_frame_origin=False
+):
     import cv2
-    from pseudo3d import adapt_rtmpose_keypoints, load_infer_json, estimate_vertical_scale
+    from pseudo3d import (
+        adapt_rtmpose_keypoints,
+        load_infer_json,
+        estimate_vertical_scale,
+    )
 
     sources = [dict(load_infer_json(path)) for path in (fo_json, dtl_json)]
-    poses = [np.stack([adapt_rtmpose_keypoints(source[int(i)]) for i in indices])
-             for source in sources]
-    origins = [pose[:, 16] if per_frame_origin else np.repeat(pose[:1, 16], len(indices), axis=0)
-               for pose in poses]
+    poses = [
+        np.stack([adapt_rtmpose_keypoints(source[int(i)]) for i in indices])
+        for source in sources
+    ]
+    origins = [
+        pose[:, 16]
+        if per_frame_origin
+        else np.repeat(pose[:1, 16], len(indices), axis=0)
+        for pose in poses
+    ]
     scale = estimate_vertical_scale(*poses)
-    projected = [points[:, :, :2] + origins[0][:, None],
-                 points[:, :, [2, 1]] / scale + origins[1][:, None]]
+    projected = [
+        points[:, :, :2] + origins[0][:, None],
+        points[:, :, [2, 1]] / scale + origins[1][:, None],
+    ]
     result = {}
     for name, path, original, projection in zip(
-            ("fo", "dtl"), (fo_video, dtl_video), poses, projected):
+        ("fo", "dtl"), (fo_video, dtl_video), poses, projected
+    ):
         capture = cv2.VideoCapture(str(path))
         images = []
         try:
@@ -82,22 +110,40 @@ def build_comparison(points, indices, fo_json, dtl_json, fo_video, dtl_video,
                 if frame_id in wanted:
                     height, width = image.shape[:2]
                     ratio = min(1, 960 / max(width, height))
-                    image = cv2.resize(image, (round(width * ratio), round(height * ratio)))
-                    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    image = cv2.resize(
+                        image, (round(width * ratio), round(height * ratio))
+                    )
+                    ok, encoded = cv2.imencode(
+                        ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 80]
+                    )
                     if not ok:
-                        raise ValueError(f"Cannot encode video frame {frame_id}: {path}")
-                    images.append("data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii"))
+                        raise ValueError(
+                            f"Cannot encode video frame {frame_id}: {path}"
+                        )
+                    images.append(
+                        "data:image/jpeg;base64,"
+                        + base64.b64encode(encoded).decode("ascii")
+                    )
                 frame_id += 1
         finally:
             capture.release()
-        result[name] = dict(images=images, width=width, height=height, fps=fps,
-                            original=original.tolist(), projected=projection.tolist())
+        result[name] = dict(
+            images=images,
+            width=width,
+            height=height,
+            fps=fps,
+            original=original.tolist(),
+            projected=projection.tolist(),
+        )
     return result
 
 
 def create_viewer_html(
-    npz_path: str | Path, output: str | Path, config_path="keypoint_config.json",
-    *, comparison=None
+    npz_path: str | Path,
+    output: str | Path,
+    config_path="keypoint_config.json",
+    *,
+    comparison=None,
 ) -> Path:
     """Write a self-contained, offline HTML skeleton viewer."""
     points, frame_indices, joint_names = load_keypoints3d(npz_path)
@@ -105,16 +151,23 @@ def create_viewer_html(
         skeleton = np.asarray(data["skeleton"]) if "skeleton" in data else None
         fps = float(data["fps"]) if "fps" in data else 30.0
         head = str(data["head_joint"].item()) if "head_joint" in data else None
-        coordinates = (str(data["coordinate_system"].item()) if "coordinate_system" in data
-                       else "camera" if joint_names == H36M_JOINT_NAMES.tolist() else "pseudo3d")
+        coordinates = (
+            str(data["coordinate_system"].item())
+            if "coordinate_system" in data
+            else "camera"
+            if joint_names == H36M_JOINT_NAMES.tolist()
+            else "pseudo3d"
+        )
     if coordinates not in {"camera", "pseudo3d"}:
         raise ValueError(f"Unknown coordinate system: {coordinates}")
     if not np.isfinite(fps) or fps <= 0:
         raise ValueError("fps must be a positive finite number")
     if skeleton is not None and (
-        skeleton.ndim != 2 or skeleton.shape[1] != 2
+        skeleton.ndim != 2
+        or skeleton.shape[1] != 2
         or not np.issubdtype(skeleton.dtype, np.integer)
-        or np.any(skeleton < 0) or np.any(skeleton >= len(joint_names))
+        or np.any(skeleton < 0)
+        or np.any(skeleton >= len(joint_names))
     ):
         raise ValueError("skeleton must contain pairs of valid joint indices")
     # Camera depth points away from FO; fusion Z points toward FO.
@@ -132,7 +185,8 @@ def create_viewer_html(
         "fps": fps,
         "source": Path(npz_path).name,
         "visible": config.get("visible_joint_indices", list(range(17))),
-        "head": head or config.get("head_joint", "head" if "head" in joint_names else "nose"),
+        "head": head
+        or config.get("head_joint", "head" if "head" in joint_names else "nose"),
         "headRadius": config.get("head_radius", 11),
         "boneColor": config.get("default_bone_color", "#55d6be"),
         "boneColors": config.get("bone_colors", {}),
@@ -144,7 +198,7 @@ def create_viewer_html(
     return output_path
 
 
-_HTML_TEMPLATE = r'''<!doctype html>
+_HTML_TEMPLATE = r"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>3D Skeleton Viewer</title>
@@ -230,7 +284,7 @@ canvas.onpointerdown=e=>{if(view==='dtl'){yaw=Math.PI/2;pitch=0}else if(view==='
 canvas.onpointermove=e=>{if(!drag)return;yaw+=(e.clientX-px)*.008;pitch=Math.max(-Math.PI,Math.min(Math.PI,pitch+(e.clientY-py)*.008));px=e.clientX;py=e.clientY;draw()};
 canvas.onpointerup=()=>{drag=false;canvas.classList.remove('drag')};canvas.onwheel=e=>{e.preventDefault();zoom=Math.max(.2,Math.min(6,zoom*Math.exp(-e.deltaY*.001)));draw()};
 canvas.ondblclick=()=>{view='fo';yaw=0;pitch=0;zoom=1;document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.dataset.view==='fo'));draw()};addEventListener('resize',resize);resize();
-</script></body></html>'''
+</script></body></html>"""
 
 
 def main() -> None:
@@ -250,10 +304,13 @@ def main() -> None:
     comparison = None
     if all(inputs):
         points, indices, _ = load_keypoints3d(args.input)
-        comparison = build_comparison(points, indices, *inputs,
-                                      per_frame_origin=args.per_frame_origin)
+        comparison = build_comparison(
+            points, indices, *inputs, per_frame_origin=args.per_frame_origin
+        )
     output = args.output or args.input.with_suffix(".html")
-    output = create_viewer_html(args.input, output, args.config, comparison=comparison).resolve()
+    output = create_viewer_html(
+        args.input, output, args.config, comparison=comparison
+    ).resolve()
     print(f"Viewer saved to: {output}")
 
 

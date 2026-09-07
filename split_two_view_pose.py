@@ -13,7 +13,9 @@ def parse_args() -> argparse.Namespace:
         description="Split the left pose as FO and the right pose as DTL."
     )
     parser.add_argument("input", type=Path, help="Input *_pose.json")
-    parser.add_argument("--output-dir", type=Path, help="Defaults to the input directory")
+    parser.add_argument(
+        "--output-dir", type=Path, help="Defaults to the input directory"
+    )
     return parser.parse_args()
 
 
@@ -26,7 +28,9 @@ def horizontal_center(instance: dict) -> float:
     keypoints = instance.get("keypoints", [])
     xs = [float(point[0]) for point in keypoints if isinstance(point, list) and point]
     if not xs:
-        raise ValueError(f"Instance has neither a valid bbox nor keypoints: {instance!r}")
+        raise ValueError(
+            f"Instance has neither a valid bbox nor keypoints: {instance!r}"
+        )
     return statistics.median(xs)
 
 
@@ -62,7 +66,9 @@ def main() -> None:
     views = {"fo": [], "dtl": []}
     missing = {"fo": 0, "dtl": 0}
     for frame in frames:
-        if not isinstance(frame, dict) or not isinstance(frame.get("instances", []), list):
+        if not isinstance(frame, dict) or not isinstance(
+            frame.get("instances", []), list
+        ):
             raise ValueError(f"Invalid frame structure: {frame!r}")
         instances = sorted(frame.get("instances", []), key=horizontal_center)
         selected = {"fo": None, "dtl": None}
@@ -87,7 +93,9 @@ def main() -> None:
         output = output_dir / f"{stem}_{view}_pose.json"
         with output.open("w", encoding="utf-8") as file:
             json.dump(split_frames, file, ensure_ascii=False)
-        print(f"{view.upper()}: {output} ({len(split_frames)} frames, {missing[view]} empty)")
+        print(
+            f"{view.upper()}: {output} ({len(split_frames)} frames, {missing[view]} empty)"
+        )
     print(f"Learned horizontal split: x={split_x:.2f} (left=FO, right=DTL)")
 
 

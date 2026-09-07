@@ -5,10 +5,23 @@ from pathlib import Path
 
 
 COCO17_NAMES = (
-    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
-    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-    "left_wrist", "right_wrist", "left_hip", "right_hip",
-    "left_knee", "right_knee", "left_ankle", "right_ankle",
+    "nose",
+    "left_eye",
+    "right_eye",
+    "left_ear",
+    "right_ear",
+    "left_shoulder",
+    "right_shoulder",
+    "left_elbow",
+    "right_elbow",
+    "left_wrist",
+    "right_wrist",
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
 )
 
 
@@ -36,6 +49,8 @@ def filter_predictions(predictions, config):
         for instance in instances:
             instance["keypoints"] = [instance["keypoints"][i] for i in indices]
             if "keypoint_scores" in instance:
-                instance["keypoint_scores"] = [instance["keypoint_scores"][i] for i in indices]
+                instance["keypoint_scores"] = [
+                    instance["keypoint_scores"][i] for i in indices
+                ]
             instance["keypoint_indices"] = indices
     return predictions

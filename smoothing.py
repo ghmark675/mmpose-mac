@@ -44,20 +44,18 @@ def _smooth_segment(points: np.ndarray, window_length: int) -> np.ndarray:
     result = np.empty_like(points)
 
     # At interior frames evaluate each local fit at its center (x = 0).
-    windows = np.lib.stride_tricks.sliding_window_view(
-        points, window_length, axis=0
-    )
+    windows = np.lib.stride_tricks.sliding_window_view(points, window_length, axis=0)
     result[half:-half] = np.einsum("ijkw,w->ijk", windows, fit[0])
 
     # Like SG's conventional 'interp' edge treatment, evaluate one fitted
     # polynomial over the first/last window. No padding or extra frames.
     flattened = points.reshape(len(points), -1)
-    result[:half] = (
-        design[:half] @ (fit @ flattened[:window_length])
-    ).reshape(half, 17, 3)
-    result[-half:] = (
-        design[-half:] @ (fit @ flattened[-window_length:])
-    ).reshape(half, 17, 3)
+    result[:half] = (design[:half] @ (fit @ flattened[:window_length])).reshape(
+        half, 17, 3
+    )
+    result[-half:] = (design[-half:] @ (fit @ flattened[-window_length:])).reshape(
+        half, 17, 3
+    )
     return result
 
 

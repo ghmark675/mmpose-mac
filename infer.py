@@ -239,7 +239,9 @@ def main():
         help="export keypoints to JSON, optionally specifying a path",
     )
     parser.add_argument(
-        "--keypoint-config", type=Path, default=Path("keypoint_config.json"),
+        "--keypoint-config",
+        type=Path,
+        default=Path("keypoint_config.json"),
         help="keypoint filter config (used when the file exists)",
     )
     args = parser.parse_args()

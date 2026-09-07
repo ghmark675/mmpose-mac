@@ -8,7 +8,12 @@ import numpy as np
 
 from motionbert import H36M_JOINT_NAMES
 from pseudo3d import COCO17_JOINT_NAMES, reconstruct_sequence
-from visualize_3d import SKELETON, build_comparison, create_viewer_html, load_keypoints3d
+from visualize_3d import (
+    SKELETON,
+    build_comparison,
+    create_viewer_html,
+    load_keypoints3d,
+)
 
 
 class Visualize3DTest(unittest.TestCase):
@@ -17,18 +22,30 @@ class Visualize3DTest(unittest.TestCase):
             npz = Path(directory) / "keypoints3d.npz"
             html = Path(directory) / "keypoints3d.html"
             config = Path(directory) / "config.json"
-            config.write_text(json.dumps({"visible_joints": ["nose", "left_ankle"],
-                                          "bone_colors": {"0-15": "#ffffff"}}))
+            config.write_text(
+                json.dumps(
+                    {
+                        "visible_joints": ["nose", "left_ankle"],
+                        "bone_colors": {"0-15": "#ffffff"},
+                    }
+                )
+            )
             points = np.arange(2 * 17 * 3, dtype=np.float32).reshape(2, 17, 3)
-            np.savez(npz, keypoints3d=points, frame_indices=[4, 9],
-                     joint_names=COCO17_JOINT_NAMES)
+            np.savez(
+                npz,
+                keypoints3d=points,
+                frame_indices=[4, 9],
+                joint_names=COCO17_JOINT_NAMES,
+            )
             loaded, indices, names = load_keypoints3d(npz)
             np.testing.assert_array_equal(loaded, points)
             np.testing.assert_array_equal(indices, [4, 9])
             self.assertEqual(len(names), 17)
             create_viewer_html(npz, html, config)
             content = html.read_text(encoding="utf-8")
-            payload = json.loads(content.split("const data=", 1)[1].split(",canvas=", 1)[0])
+            payload = json.loads(
+                content.split("const data=", 1)[1].split(",canvas=", 1)[0]
+            )
             self.assertEqual(payload["bones"], [list(bone) for bone in SKELETON])
             self.assertEqual(payload["visible"], [0, 15])
             self.assertEqual(payload["boneColors"], {"0-15": "#ffffff"})
@@ -47,26 +64,80 @@ class Visualize3DTest(unittest.TestCase):
             self.assertNotIn("https://", content)
 
     def test_motionbert_metadata_overrides_coco_config(self):
-        names = ["root", "right_hip", "right_knee", "right_ankle", "left_hip",
-                 "left_knee", "left_ankle", "spine", "thorax", "neck", "head",
-                 "left_shoulder", "left_elbow", "left_wrist", "right_shoulder",
-                 "right_elbow", "right_wrist"]
-        bones = [[0, 1], [1, 2], [2, 3], [0, 4], [4, 5], [5, 6], [0, 7],
-                 [7, 8], [8, 9], [9, 10], [8, 11], [11, 12], [12, 13],
-                 [8, 14], [14, 15], [15, 16]]
+        names = [
+            "root",
+            "right_hip",
+            "right_knee",
+            "right_ankle",
+            "left_hip",
+            "left_knee",
+            "left_ankle",
+            "spine",
+            "thorax",
+            "neck",
+            "head",
+            "left_shoulder",
+            "left_elbow",
+            "left_wrist",
+            "right_shoulder",
+            "right_elbow",
+            "right_wrist",
+        ]
+        bones = [
+            [0, 1],
+            [1, 2],
+            [2, 3],
+            [0, 4],
+            [4, 5],
+            [5, 6],
+            [0, 7],
+            [7, 8],
+            [8, 9],
+            [9, 10],
+            [8, 11],
+            [11, 12],
+            [12, 13],
+            [8, 14],
+            [14, 15],
+            [15, 16],
+        ]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            npz, html, config = root / "pose.npz", root / "pose.html", root / "config.json"
-            config.write_text(json.dumps({"visible_joints": ["nose"], "head_joint": "nose",
-                                          "bone_colors": {"0-1": "#ffffff"}}))
+            npz, html, config = (
+                root / "pose.npz",
+                root / "pose.html",
+                root / "config.json",
+            )
+            config.write_text(
+                json.dumps(
+                    {
+                        "visible_joints": ["nose"],
+                        "head_joint": "nose",
+                        "bone_colors": {"0-1": "#ffffff"},
+                    }
+                )
+            )
             points = np.full((2, 17, 3), 0.1, dtype=np.float32)
-            for metadata, expected_head in (({}, "head"), ({"head_joint": "neck"}, "neck")):
+            for metadata, expected_head in (
+                ({}, "head"),
+                ({"head_joint": "neck"}, "neck"),
+            ):
                 with self.subTest(metadata=metadata):
-                    np.savez(npz, keypoints3d=points, frame_indices=[0, 2], joint_names=names,
-                             skeleton=bones, fps=24.0, units="meters", **metadata)
+                    np.savez(
+                        npz,
+                        keypoints3d=points,
+                        frame_indices=[0, 2],
+                        joint_names=names,
+                        skeleton=bones,
+                        fps=24.0,
+                        units="meters",
+                        **metadata,
+                    )
                     create_viewer_html(npz, html, config)
                     content = html.read_text(encoding="utf-8")
-                    payload = json.loads(content.split("const data=", 1)[1].split(",canvas=", 1)[0])
+                    payload = json.loads(
+                        content.split("const data=", 1)[1].split(",canvas=", 1)[0]
+                    )
                     self.assertEqual(payload["bones"], bones)
                     self.assertEqual(payload["visible"], list(range(17)))
                     self.assertEqual(payload["head"], expected_head)
@@ -90,11 +161,18 @@ class Visualize3DTest(unittest.TestCase):
             npz, html = Path(directory) / "pose.npz", Path(directory) / "pose.html"
             for metadata, names, expected in cases:
                 with self.subTest(metadata=metadata):
-                    np.savez(npz, keypoints3d=points, frame_indices=[7],
-                             joint_names=names, **metadata)
+                    np.savez(
+                        npz,
+                        keypoints3d=points,
+                        frame_indices=[7],
+                        joint_names=names,
+                        **metadata,
+                    )
                     create_viewer_html(npz, html)
                     content = html.read_text(encoding="utf-8")
-                    payload = json.loads(content.split("const data=", 1)[1].split(",canvas=", 1)[0])
+                    payload = json.loads(
+                        content.split("const data=", 1)[1].split(",canvas=", 1)[0]
+                    )
                     np.testing.assert_allclose(payload["points"], expected)
                     with np.load(npz, allow_pickle=False) as saved:
                         np.testing.assert_array_equal(saved["keypoints3d"], points)
@@ -103,7 +181,9 @@ class Visualize3DTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             video = root / "source.mp4"
-            writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 25, (64, 64))
+            writer = cv2.VideoWriter(
+                str(video), cv2.VideoWriter_fourcc(*"mp4v"), 25, (64, 64)
+            )
             for _ in range(3):
                 writer.write(np.zeros((64, 64, 3), dtype=np.uint8))
             writer.release()
@@ -113,28 +193,43 @@ class Visualize3DTest(unittest.TestCase):
             ids = [0, 2]
             paths = [root / "fo.json", root / "dtl.json"]
             for path, poses in zip(paths, (fo, dtl)):
-                path.write_text(json.dumps([
-                    {"frame_id": i, "instances": [{"keypoints": pose.tolist()}]}
-                    for i, pose in zip(ids, poses)
-                ]))
+                path.write_text(
+                    json.dumps(
+                        [
+                            {"frame_id": i, "instances": [{"keypoints": pose.tolist()}]}
+                            for i, pose in zip(ids, poses)
+                        ]
+                    )
+                )
             for fixed in (True, False):
-                points, indices = reconstruct_sequence(zip(ids, fo), zip(ids, dtl), fixed_origin=fixed)
-                result = build_comparison(points, indices, *paths, video, video,
-                                          per_frame_origin=not fixed)
+                points, indices = reconstruct_sequence(
+                    zip(ids, fo), zip(ids, dtl), fixed_origin=fixed
+                )
+                result = build_comparison(
+                    points, indices, *paths, video, video, per_frame_origin=not fixed
+                )
                 for name, poses in (("fo", fo), ("dtl", dtl)):
                     projected = np.asarray(result[name]["projected"])
-                    np.testing.assert_allclose(projected[:, :, 0], np.asarray(poses)[:, :, 0], atol=1e-5)
+                    np.testing.assert_allclose(
+                        projected[:, :, 0], np.asarray(poses)[:, :, 0], atol=1e-5
+                    )
                     self.assertEqual(len(result[name]["images"]), 2)
                     self.assertEqual(result[name]["fps"], 25)
                 fo_origin = np.asarray(fo)[:, 16] if not fixed else fo[0][16]
-                np.testing.assert_allclose(result["fo"]["projected"],
-                                           points[:, :, :2] + np.asarray(fo_origin).reshape(-1, 1, 2))
+                np.testing.assert_allclose(
+                    result["fo"]["projected"],
+                    points[:, :, :2] + np.asarray(fo_origin).reshape(-1, 1, 2),
+                )
 
     def test_empty_sequence_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             npz = Path(directory) / "empty.npz"
-            np.savez(npz, keypoints3d=np.empty((0, 17, 3), np.float32),
-                     frame_indices=[], joint_names=COCO17_JOINT_NAMES)
+            np.savez(
+                npz,
+                keypoints3d=np.empty((0, 17, 3), np.float32),
+                frame_indices=[],
+                joint_names=COCO17_JOINT_NAMES,
+            )
             with self.assertRaisesRegex(ValueError, "no frames"):
                 load_keypoints3d(npz)
 

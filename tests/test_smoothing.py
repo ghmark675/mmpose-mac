@@ -53,7 +53,7 @@ class SmoothingTest(unittest.TestCase):
         result = smooth_keypoints3d(points, np.arange(61), fps=60)
         error = result[2:-2, 0, 0] - trajectory[2:-2]
         np.testing.assert_allclose(error, -13 / 35 * jitter[2:-2], atol=2e-6)
-        self.assertLess(np.sqrt(np.mean(error ** 2)), 0.4)
+        self.assertLess(np.sqrt(np.mean(error**2)), 0.4)
 
     def test_gaps_are_smoothed_independently_without_filling_frames(self):
         first = coordinates(np.array([0, 0, 1, 0, 0], dtype=np.float32) + 1000)
@@ -61,10 +61,12 @@ class SmoothingTest(unittest.TestCase):
         points = np.concatenate((first, second))
         indices = np.r_[np.arange(5), np.arange(100, 107)]
         result = smooth_keypoints3d(points, indices, fps=120)
-        expected = np.concatenate((
-            smooth_keypoints3d(first, np.arange(5), fps=120),
-            smooth_keypoints3d(second, np.arange(7), fps=120),
-        ))
+        expected = np.concatenate(
+            (
+                smooth_keypoints3d(first, np.arange(5), fps=120),
+                smooth_keypoints3d(second, np.arange(7), fps=120),
+            )
+        )
         np.testing.assert_array_equal(result, expected)
         self.assertEqual(result.shape, points.shape)
         np.testing.assert_array_equal(indices, np.r_[np.arange(5), np.arange(100, 107)])
@@ -119,9 +121,14 @@ class SmoothingTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "NaN or infinity"):
                     smooth_keypoints3d(points, np.arange(5), fps=60)
         points = coordinates([0, 1, 2, 3, 4])
-        for indices in ([0, 1], [[0, 1, 2, 3, 4]], [0, 1, 1, 2, 3],
-                        [4, 3, 2, 1, 0], [0, 1, 2, 3, 4.5],
-                        [False, True, True, True, True]):
+        for indices in (
+            [0, 1],
+            [[0, 1, 2, 3, 4]],
+            [0, 1, 1, 2, 3],
+            [4, 3, 2, 1, 0],
+            [0, 1, 2, 3, 4.5],
+            [False, True, True, True, True],
+        ):
             with self.subTest(indices=indices):
                 with self.assertRaisesRegex(ValueError, "frame_indices"):
                     smooth_keypoints3d(points, indices, fps=60)

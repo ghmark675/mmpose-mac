@@ -44,15 +44,19 @@ class PipelineMotionBERTTest(unittest.TestCase):
 
     def test_image_and_video_write_complete_h36m_outputs(self):
         for is_image in (True, False):
-            with self.subTest(is_image=is_image), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(is_image=is_image),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 source = root / ("input.png" if is_image else "input.mp4")
                 image = np.zeros((64, 96, 3), dtype=np.uint8)
                 if is_image:
                     self.assertTrue(cv2.imwrite(str(source), image))
                 else:
-                    writer = cv2.VideoWriter(str(source), cv2.VideoWriter_fourcc(*"mp4v"),
-                                             24, (96, 64))
+                    writer = cv2.VideoWriter(
+                        str(source), cv2.VideoWriter_fourcc(*"mp4v"), 24, (96, 64)
+                    )
                     self.assertTrue(writer.isOpened())
                     for _ in range(3):
                         writer.write(image)
@@ -60,35 +64,66 @@ class PipelineMotionBERTTest(unittest.TestCase):
                 model = root / "model.onnx"
                 model.touch()
                 args = argparse.Namespace(
-                    input=source, output_dir=root / "result", det_model=model,
-                    pose_model=model, lift_model=model, det_thr=0.4, kpt_thr=0.3,
-                    no_bbox_norm=True, save_pose_video=False,
+                    input=source,
+                    output_dir=root / "result",
+                    det_model=model,
+                    pose_model=model,
+                    lift_model=model,
+                    det_thr=0.4,
+                    kpt_thr=0.3,
+                    no_bbox_norm=True,
+                    save_pose_video=False,
                 )
                 instance = person([0, 0, 60, 60], joints=26)
-                predictions = ([{"frame_id": 0, "instances": [instance]}] if is_image else [
-                    {"frame_id": 0, "instances": []},
-                    {"frame_id": 1, "instances": [instance]},
-                    {"frame_id": 2, "instances": []},
-                ])
+                predictions = (
+                    [{"frame_id": 0, "instances": [instance]}]
+                    if is_image
+                    else [
+                        {"frame_id": 0, "instances": []},
+                        {"frame_id": 1, "instances": [instance]},
+                        {"frame_id": 2, "instances": []},
+                    ]
+                )
                 ids = [0] if is_image else [1, 2]
                 detected = [True] if is_image else [True, False]
-                points3d = np.arange(len(ids) * 51, dtype=np.float32).reshape(-1, 17, 3) / 100
-                with patch("pipeline_motionbert.create_session", side_effect=["det", "pose"]), \
-                     patch("pipeline_motionbert.ort.InferenceSession", return_value="lift"), \
-                     patch("pipeline_motionbert.infer", return_value=(image, [instance])), \
-                     patch("pipeline_motionbert.run_video", return_value=predictions), \
-                     patch("pipeline_motionbert.lift_sequence", return_value=points3d) as lift, \
-                     patch("visualize_3d.load_keypoint_config", return_value={
-                         "visible_joint_indices": [0], "head_joint": "nose",
-                     }):
+                points3d = (
+                    np.arange(len(ids) * 51, dtype=np.float32).reshape(-1, 17, 3) / 100
+                )
+                with (
+                    patch(
+                        "pipeline_motionbert.create_session",
+                        side_effect=["det", "pose"],
+                    ),
+                    patch(
+                        "pipeline_motionbert.ort.InferenceSession", return_value="lift"
+                    ),
+                    patch(
+                        "pipeline_motionbert.infer", return_value=(image, [instance])
+                    ),
+                    patch("pipeline_motionbert.run_video", return_value=predictions),
+                    patch(
+                        "pipeline_motionbert.lift_sequence", return_value=points3d
+                    ) as lift,
+                    patch(
+                        "visualize_3d.load_keypoint_config",
+                        return_value={
+                            "visible_joint_indices": [0],
+                            "head_joint": "nose",
+                        },
+                    ),
+                ):
                     paths = run_pipeline(args)
 
-                self.assertEqual(set(paths), {"json_2d", "json_3d", "npz", "html"}
-                                 | ({"image"} if is_image else set()))
+                self.assertEqual(
+                    set(paths),
+                    {"json_2d", "json_3d", "npz", "html"}
+                    | ({"image"} if is_image else set()),
+                )
                 self.assertTrue(all(path.is_file() for path in paths.values()))
                 self.assertEqual(json.loads(paths["json_2d"].read_text()), predictions)
-                np.testing.assert_array_equal(lift.call_args.args[1],
-                                              [instance["keypoints"][:17]] * len(ids))
+                np.testing.assert_array_equal(
+                    lift.call_args.args[1], [instance["keypoints"][:17]] * len(ids)
+                )
                 self.assertEqual(lift.call_args.args[3:], (96, 64))
                 self.assertEqual(lift.call_args.kwargs, {"bbox_norm": False})
                 fps = 1.0 if is_image else 24.0
@@ -96,7 +131,9 @@ class PipelineMotionBERTTest(unittest.TestCase):
                     np.testing.assert_array_equal(saved["keypoints3d"], points3d)
                     np.testing.assert_array_equal(saved["frame_indices"], ids)
                     np.testing.assert_array_equal(saved["detected"], detected)
-                    np.testing.assert_array_equal(saved["joint_names"], H36M_JOINT_NAMES)
+                    np.testing.assert_array_equal(
+                        saved["joint_names"], H36M_JOINT_NAMES
+                    )
                     np.testing.assert_array_equal(saved["skeleton"], H36M_SKELETON)
                     self.assertEqual(float(saved["fps"]), fps)
                     self.assertEqual(str(saved["units"]), "meters")
@@ -108,11 +145,18 @@ class PipelineMotionBERTTest(unittest.TestCase):
                 self.assertEqual(payload["joint_names"], list(H36M_JOINT_NAMES))
                 self.assertEqual(payload["image_size"], [96, 64])
                 self.assertEqual(payload["fps"], fps)
-                self.assertEqual([frame["frame_id"] for frame in payload["frames"]], ids)
-                self.assertEqual([frame["detected"] for frame in payload["frames"]], detected)
-                np.testing.assert_array_equal([f["keypoints_3d"] for f in payload["frames"]], points3d)
+                self.assertEqual(
+                    [frame["frame_id"] for frame in payload["frames"]], ids
+                )
+                self.assertEqual(
+                    [frame["detected"] for frame in payload["frames"]], detected
+                )
+                np.testing.assert_array_equal(
+                    [f["keypoints_3d"] for f in payload["frames"]], points3d
+                )
                 viewer, _ = json.JSONDecoder().raw_decode(
-                    paths["html"].read_text().split("const data=", 1)[1])
+                    paths["html"].read_text().split("const data=", 1)[1]
+                )
                 self.assertEqual(viewer["visible"], list(range(17)))
                 self.assertEqual(viewer["head"], "head")
                 self.assertEqual(viewer["fps"], fps)
